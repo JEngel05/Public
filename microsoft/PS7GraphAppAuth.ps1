@@ -64,7 +64,7 @@ switch ($domain) {
     }
     "Prod" {
         $script:clientidp = "" # Update with the Azure App ID for Prod
-        $script:tenantidp = "" # Update with the Azure App ID for Prod
+        $script:tenantidp = "" # Update with the Azure Tenant ID for Prod
         $script:authurip = "https://login.microsoftonline.com/$tenantidp/oauth2/v2.0/token"
         
         $AuthBodyp = @{
