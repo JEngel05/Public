@@ -1,6 +1,7 @@
-# Update AzureFunctionURL, FilterDomain, and FQDN.  Update line 91 to include any account names you wish to exclude, such as service accounts.
 # Azure URL
-$AzureFunctionURL = ""
+$AzureFunctionURL = "" # Update with Function App URL
+$filterDomain = "" # On Prem Domain Name
+$FQDN = "" # Fully qualified domain name for Azure Tenant
 
 # Enable TLS 1.2 support 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -63,8 +64,7 @@ $AzureADTenantID = Get-AzureADTenantID # Azure Tenant ID
 ###### START DEVICE USER QUERY
 
 #Filters for user logon events based on your domain and how far back to search the event log
-$filterDomain = "" # Domain
-$FQDN = "" # Tenant FQDN
+
 $StartTime = (Get-Date).AddDays(-7)
 
 #Hash table to filter for logon events in security log
@@ -87,7 +87,7 @@ ForEach($Event in $LogHistory){
     $User = $Event.Properties[5].Value.ToString()
     $Domain = $Event.Properties[6].value.ToString()
 
-    # ADD Users and exclude "aw" accounts and exclude computer accounts that end with $
+    # ADD Users and exclude computer accounts that end with $ and exlucde svc accounts
     If(($Domain -eq "$FilterDomain") -and (-not($user.StartsWith("svc."))) -and (-not($user.EndsWith("$"))) ){
         # If the user has a FQDN suffix add to $users, otherwise append the FQDN before adding to ensure the same dataset between HAADJ and AADJ systems.
         If ($user -like "*$fqdn") {
@@ -107,7 +107,7 @@ $UserList | ForEach-Object { $UserHash[$_.Name] = $_.Count }
 
 ###### END DEVICE USER QUERY
 
-# Construct main payload to send to LogCollectorAPI
+# Construct main payload to send to the Azure Function
 $MainPayLoad = [PSCustomObject]@{
 	AzureADTenantID = $AzureADTenantID
 	AzureADDeviceID = $AzureADDeviceID
@@ -124,29 +124,28 @@ $ExitCode = 0
 $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
 $headers.Add("Content-Type", "application/json")
 
-# Query if HAADJ or AADJ
-$domain = (Get-CimInstance -Namespace root\cimv2 -Class Win32_ComputerSystem).domain
 
 # Attempt to send data to API
+
 try {
-    $ResponseInventory = Invoke-RestMethod $AzureFunctionURL -Method 'POST' -Headers $headers -Body $MainPayLoadJson
-    foreach ($response in $ResponseInventory){
-        if ($response.response -match "200"){
-        $OutputMessage = $OutPutMessage + "OK: $($response.logname) $($response.response) "
-        }
-        else{
-        $OutputMessage = $OutPutMessage + "FAIL: $($response.logname) $($response.response) "
+    $Response = Invoke-WebRequest $AzureFunctionURL -Method 'POST' -Headers $headers -Body $MainPayLoadJson -UseBasicParsing
+    if ($response.StatusCode -eq "200"){
+        $OutputMessage = "SUCCESS: $($response.StatusDescription): $($response.StatusCode) - $($response.content) "
+        $ExitCode = 0
+    } else {
+        $OutputMessage = "FAIL: $($response.StatusDescription): $($response.StatusCode) - $($response.content) "
         $ExitCode = 1
-        }
     }
-} 
+    } 
 catch {
-	$ResponseInventory = "Error Code: $($_.Exception.Response.StatusCode.value__)"
-	$ResponseMessage = $_.Exception.Message
-    $OutputMessage = $OutPutMessage + "Inventory:FAIL " + $ResponseInventory + $ResponseMessage
+    $ResponseInventory = "Error Code: $($_.Exception.Response.StatusCode.value__)"
+    $ResponseMessage = $_.Exception.Message
+    $OutputMessage = "Validate Connectivity to Azure or Investigate Function App - $($ResponseInventory) + $($ResponseMessage) "
     $ExitCode = 1
 }
-# Exit script with correct output and code
 
+
+
+# Exit script with correct output and code
 Write-Output $OutputMessage
 Exit $ExitCode	
